@@ -11,6 +11,8 @@ pub struct Coro {
     frame: FrameRef,
     closed: Cell<bool>,
     running: Cell<bool>,
+    started: Cell<bool>,
+    async_iter: bool,
 }
 
 impl Coro {
@@ -19,6 +21,17 @@ impl Coro {
             frame,
             closed: Cell::new(false),
             running: Cell::new(false),
+            started: Cell::new(false),
+            async_iter: false,
+        }
+    }
+    pub fn new_async(frame: FrameRef) -> Self {
+        Coro {
+            frame,
+            closed: Cell::new(false),
+            running: Cell::new(false),
+            started: Cell::new(false),
+            async_iter: true,
         }
     }
 
@@ -33,15 +46,14 @@ impl Coro {
         if self.closed.get() {
             return Err(objiter::new_stop_iteration(vm));
         }
-
         self.frame.push_value(value.clone());
         self.running.set(true);
         let result = vm.run_frame(self.frame.clone());
         self.running.set(false);
+        self.started.set(true);
         self.maybe_close(&result);
-        result?.into_result(vm)
+        result?.into_result(self.async_iter, vm)
     }
-
     pub fn throw(
         &self,
         exc_type: PyObjectRef,
@@ -56,9 +68,10 @@ impl Coro {
         self.running.set(true);
         let result = self.frame.gen_throw(vm, exc_type, exc_val, exc_tb);
         self.running.set(false);
+        self.started.set(true);
         self.maybe_close(&result);
         vm.frames.borrow_mut().pop();
-        result?.into_result(vm)
+        result?.into_result(self.async_iter, vm)
     }
 
     pub fn close(&self, vm: &VirtualMachine) -> PyResult<()> {
@@ -85,11 +98,14 @@ impl Coro {
         }
     }
 
-    pub fn closed(&self) -> bool {
-        self.closed.get()
+    pub fn started(&self) -> bool {
+        self.started.get()
     }
     pub fn running(&self) -> bool {
         self.running.get()
+    }
+    pub fn closed(&self) -> bool {
+        self.closed.get()
     }
     pub fn frame(&self) -> FrameRef {
         self.frame.clone()
