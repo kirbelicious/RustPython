@@ -9,7 +9,7 @@ use std::cell::Cell;
 #[derive(Debug)]
 pub struct Coro {
     frame: FrameRef,
-    closed: Cell<bool>,
+    pub closed: Cell<bool>,
     running: Cell<bool>,
     started: Cell<bool>,
     async_iter: bool,
@@ -46,7 +46,12 @@ impl Coro {
         if self.closed.get() {
             return Err(objiter::new_stop_iteration(vm));
         }
-        self.frame.push_value(value.clone());
+        if !self.started.get() && !vm.is_none(&value) {
+            return Err(vm.new_type_error(
+                "can't send non-None value to a just-started coroutine".to_string(),
+            ));
+        }
+        self.frame.push_value(value);
         self.running.set(true);
         let result = vm.run_frame(self.frame.clone());
         self.running.set(false);
